@@ -1,0 +1,395 @@
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+
+local Request = (syn and syn.request) or (http and http.request) or http_request or request
+if not Request then return warn("Executor lu ga support HTTP") end
+
+if CoreGui:FindFirstChild("ScriptbloxUI") then CoreGui.ScriptbloxUI:Destroy() end
+
+-- Save system
+local function SaveFile(name, data)
+    if writefile then writefile("Scriptblox_"..name..".json", HttpService:JSONEncode(data)) end
+end
+
+local function LoadFile(name)
+    if isfile and isfile("Scriptblox_"..name..".json") then
+        return HttpService:JSONDecode(readfile("Scriptblox_"..name..".json"))
+    end
+    return {}
+end
+
+local Favorites = LoadFile("Favorites")
+local History = LoadFile("History")
+
+local function IsFavorited(scriptId)
+    for _, v in ipairs(Favorites) do
+        if v._id == scriptId then return true end
+    end
+    return false
+end
+
+-- Deteksi keamanan
+local function ScanSecurity(scriptText)
+    local flags = {}
+    local lower = string.lower(scriptText or "")
+    if string.find(lower, "getgenv%(") or string.find(lower, "_g%[") then table.insert(flags, "⚠️ Akses _G/getgenv") end
+    if string.find(lower, "httpget") and string.find(lower, "loadstring") then table.insert(flags, "🚨 HttpGet + Loadstring") end
+    if string.find(lower, "require%(") then table.insert(flags, "⚠️ Require module") end
+    if string.find(lower, "writefile") or string.find(lower, "delfile") then table.insert(flags, "📁 Akses file") end
+    if string.find(lower, "webhook") or string.find(lower, "discord.com/api") then table.insert(flags, "🔗 Discord Webhook") end
+    if string.find(lower, "game:shutdown") then table.insert(flags, "💀 Force shutdown") end
+    return #flags > 0 and flags or {"✅ Aman"}
+end
+
+-- Image cache biar load cepet
+local ImageCache = {}
+local function GetImageAsset(url)
+    if not url or url == "" then return "rbxasset://textures/ui/GuiImagePlaceholder.png" end
+    if ImageCache[url] then return ImageCache[url] end
+    
+    local success, result = pcall(function()
+        -- Pake getcustomasset kalo ada, fallback ke url langsung
+        if getcustomasset then
+            local fileName = "zazz_thumb_".. HttpService:GenerateGUID(false).. ".png"
+            local imageData = game:HttpGet(url)
+            writefile(fileName, imageData)
+            return getcustomasset(fileName)
+        else
+            return url
+        end
+    end)
+    
+    if success then
+        ImageCache[url] = result
+        return result
+    else
+        return "rbxasset://textures/ui/GuiImagePlaceholder.png"
+    end
+end
+
+-- UI
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
+ScreenGui.Name = "ScriptbloxUI"
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size = UDim2.new(0, 650, 0, 450) -- Gedein dikit buat gambar
+Main.Position = UDim2.new(0.5, -325, 0.5, -225)
+Main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
+
+-- Topbar
+local Topbar = Instance.new("Frame", Main)
+Topbar.Size = UDim2.new(1, 0, 0, 35)
+Topbar.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+Topbar.BorderSizePixel = 0
+
+local Title = Instance.new("TextLabel", Topbar)
+Title.Text = " Search by zazz"
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+
+local MinBtn = Instance.new("TextButton", Topbar)
+MinBtn.Text = "–"
+MinBtn.Size = UDim2.new(0, 35, 1, 0)
+MinBtn.Position = UDim2.new(1, -70, 0, 0)
+MinBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MinBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+MinBtn.BorderSizePixel = 0
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 20
+
+local CloseBtn = Instance.new("TextButton", Topbar)
+CloseBtn.Text = "×"
+CloseBtn.Size = UDim2.new(0, 35, 1, 0)
+CloseBtn.Position = UDim2.new(1, -35, 0, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 20
+
+-- Mini ball
+local MiniBall = Instance.new("TextButton", ScreenGui)
+MiniBall.Size = UDim2.new(0, 50, 0, 50)
+MiniBall.Position = UDim2.new(0, 20, 0.5, -25)
+MiniBall.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+MiniBall.Text = "zazz"
+MiniBall.TextColor3 = Color3.fromRGB(255, 255, 255)
+MiniBall.Font = Enum.Font.GothamBold
+MiniBall.TextSize = 12
+MiniBall.Visible = false
+MiniBall.Active = true
+MiniBall.Draggable = true
+Instance.new("UICorner", MiniBall).CornerRadius = UDim.new(1, 0)
+
+-- Tabs
+local TabFrame = Instance.new("Frame", Main)
+TabFrame.Size = UDim2.new(1, -20, 0, 30)
+TabFrame.Position = UDim2.new(0, 10, 0, 45)
+TabFrame.BackgroundTransparency = 1
+
+local function CreateTab(name, pos)
+    local btn = Instance.new("TextButton", TabFrame)
+    btn.Text = name
+    btn.Size = UDim2.new(0, 100, 1, 0)
+    btn.Position = UDim2.new(0, pos, 0, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    btn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 13
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
+
+local SearchTab = CreateTab("Search", 0)
+local FavTab = CreateTab("Favorit", 105)
+local HistoryTab = CreateTab("History", 210)
+
+-- Search
+local SearchBox = Instance.new("TextBox", Main)
+SearchBox.PlaceholderText = "Cari script... misal: Blox Fruits, Doors"
+SearchBox.Size = UDim2.new(1, -120, 0, 30)
+SearchBox.Position = UDim2.new(0, 10, 0, 85)
+SearchBox.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.TextSize = 13
+SearchBox.ClearTextOnFocus = false
+Instance.new("UICorner", SearchBox).CornerRadius = UDim.new(0, 6)
+
+local SearchBtn = Instance.new("TextButton", Main)
+SearchBtn.Text = "Cari"
+SearchBtn.Size = UDim2.new(0, 90, 0, 30)
+SearchBtn.Position = UDim2.new(1, -100, 0, 85)
+SearchBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+SearchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBtn.Font = Enum.Font.GothamBold
+SearchBtn.TextSize = 13
+Instance.new("UICorner", SearchBtn).CornerRadius = UDim.new(0, 6)
+
+-- Results
+local ScrollFrame = Instance.new("ScrollingFrame", Main)
+ScrollFrame.Size = UDim2.new(1, -20, 1, -135)
+ScrollFrame.Position = UDim2.new(0, 10, 0, 125)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 4
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+
+local UIListLayout = Instance.new("UIListLayout", ScrollFrame)
+UIListLayout.Padding = UDim.new(0, 8)
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local currentResults = {}
+
+local function ClearResults()
+    for _, v in pairs(ScrollFrame:GetChildren()) do
+        if v:IsA("Frame") then v:Destroy() end
+    end
+    task.wait()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+end
+
+local function AddResultCard(data)
+    local Card = Instance.new("Frame", ScrollFrame)
+    Card.Size = UDim2.new(1, -10, 0, 120) -- Tinggiin buat gambar
+    Card.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 6)
+
+    -- Thumbnail
+    local Thumbnail = Instance.new("ImageLabel", Card)
+    Thumbnail.Size = UDim2.new(0, 100, 0, 100)
+    Thumbnail.Position = UDim2.new(0, 10, 0, 10)
+    Thumbnail.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    Thumbnail.Image = GetImageAsset(data.game and data.game.imageUrl or data.image)
+    Thumbnail.ScaleType = Enum.ScaleType.Crop
+    Instance.new("UICorner", Thumbnail).CornerRadius = UDim.new(0, 6)
+
+    local Title = Instance.new("TextLabel", Card)
+    Title.Text = data.title
+    Title.Size = UDim2.new(1, -130, 0, 25)
+    Title.Position = UDim2.new(0, 120, 0, 8)
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.BackgroundTransparency = 1
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 14
+    Title.TextTruncate = Enum.TextTruncate.AtEnd
+
+    local Game = Instance.new("TextLabel", Card)
+    Game.Text = "Game: ".. (data.game and data.game.name or "Universal")
+    Game.Size = UDim2.new(1, -130, 0, 18)
+    Game.Position = UDim2.new(0, 120, 0, 31)
+    Game.TextColor3 = Color3.fromRGB(180, 180, 180)
+    Game.TextXAlignment = Enum.TextXAlignment.Left
+    Game.BackgroundTransparency = 1
+    Game.Font = Enum.Font.Gotham
+    Game.TextSize = 12
+
+    local Views = Instance.new("TextLabel", Card)
+    Views.Text = "Views: ".. data.views.. " | ".. (data.verified and "✓ Verified" or "Unverified")
+    Views.Size = UDim2.new(1, -130, 0, 18)
+    Views.Position = UDim2.new(0, 120, 0, 47)
+    Views.TextColor3 = data.verified and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(180, 180, 180)
+    Views.TextXAlignment = Enum.TextXAlignment.Left
+    Views.BackgroundTransparency = 1
+    Views.Font = Enum.Font.Gotham
+    Views.TextSize = 12
+
+    local Security = Instance.new("TextLabel", Card)
+    local scanResult = ScanSecurity(data.script or "")
+    Security.Text = scanResult[1]
+    Security.Size = UDim2.new(1, -130, 0, 18)
+    Security.Position = UDim2.new(0, 120, 0, 63)
+    Security.TextColor3 = string.find(scanResult[1], "✅") and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 150, 80)
+    Security.TextXAlignment = Enum.TextXAlignment.Left
+    Security.BackgroundTransparency = 1
+    Security.Font = Enum.Font.Gotham
+    Security.TextSize = 11
+
+    -- Tombol Run
+    local RunBtn = Instance.new("TextButton", Card)
+    RunBtn.Text = "Run"
+    RunBtn.Size = UDim2.new(0, 65, 0, 26)
+    RunBtn.Position = UDim2.new(0, 120, 1, -32)
+    RunBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 80)
+    RunBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    RunBtn.Font = Enum.Font.GothamBold
+    RunBtn.TextSize = 12
+    Instance.new("UICorner", RunBtn).CornerRadius = UDim.new(0, 4)
+
+    -- Tombol Copy
+    local CopyBtn = Instance.new("TextButton", Card)
+    CopyBtn.Text = "Copy"
+    CopyBtn.Size = UDim2.new(0, 65, 0, 26)
+    CopyBtn.Position = UDim2.new(0, 190, 1, -32)
+    CopyBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+    CopyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CopyBtn.Font = Enum.Font.GothamBold
+    CopyBtn.TextSize = 12
+    Instance.new("UICorner", CopyBtn).CornerRadius = UDim.new(0, 4)
+
+    -- Tombol Favorit
+    local FavBtn = Instance.new("TextButton", Card)
+    FavBtn.Text = IsFavorited(data._id) and "★" or "☆"
+    FavBtn.Size = UDim2.new(0, 32, 0, 26)
+    FavBtn.Position = UDim2.new(0, 260, 1, -32)
+    FavBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+    FavBtn.TextColor3 = IsFavorited(data._id) and Color3.fromRGB(255, 200, 0) or Color3.fromRGB(150, 150, 150)
+    FavBtn.Font = Enum.Font.GothamBold
+    FavBtn.TextSize = 16
+    Instance.new("UICorner", FavBtn).CornerRadius = UDim.new(0, 4)
+
+    -- Fungsi tombol
+    RunBtn.MouseButton1Click:Connect(function()
+        RunBtn.Text = "..."
+        local func, err = loadstring(data.script)
+        if func then
+            local success, runErr = pcall(func)
+            RunBtn.Text = success and "Done!" or "Error"
+        else
+            RunBtn.Text = "Err"
+        end
+        task.wait(1)
+        RunBtn.Text = "Run"
+
+        table.insert(History, 1, data)
+        if #History > 50 then table.remove(History) end
+        SaveFile("History", History)
+    end)
+
+    CopyBtn.MouseButton1Click:Connect(function()
+        setclipboard(data.script)
+        CopyBtn.Text = "Copied!"
+        task.wait(1)
+        CopyBtn.Text = "Copy"
+
+        table.insert(History, 1, data)
+        if #History > 50 then table.remove(History) end
+        SaveFile("History", History)
+    end)
+
+    FavBtn.MouseButton1Click:Connect(function()
+        if IsFavorited(data._id) then
+            for i, v in ipairs(Favorites) do
+                if v._id == data._id then table.remove(Favorites, i) break end
+            end
+            FavBtn.Text = "☆"
+            FavBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+        else
+            table.insert(Favorites, data)
+            FavBtn.Text = "★"
+            FavBtn.TextColor3 = Color3.fromRGB(255, 200, 0)
+        end
+        SaveFile("Favorites", Favorites)
+    end)
+
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+end
+
+local function DoSearch(query)
+    SearchBtn.Text = "..."
+    ClearResults()
+
+    local url = "https://scriptblox.com/api/script/search?q=".. HttpService:UrlEncode(query).. "&page=1"
+    local success, response = pcall(function()
+        return Request({Url = url, Method = "GET"})
+    end)
+
+    if success and response.StatusCode == 200 then
+        local data = HttpService:JSONDecode(response.Body)
+        currentResults = data.result.scripts
+        for _, scriptData in ipairs(currentResults) do
+            AddResultCard(scriptData)
+        end
+    else
+        warn("Gagal fetch")
+    end
+    SearchBtn.Text = "Cari"
+end
+
+-- Events
+SearchBtn.MouseButton1Click:Connect(function()
+    if SearchBox.Text ~= "" then DoSearch(SearchBox.Text) end
+end)
+
+FavTab.MouseButton1Click:Connect(function()
+    ClearResults()
+    for _, data in ipairs(Favorites) do AddResultCard(data) end
+end)
+
+HistoryTab.MouseButton1Click:Connect(function()
+    ClearResults()
+    for _, data in ipairs(History) do AddResultCard(data) end
+end)
+
+SearchTab.MouseButton1Click:Connect(function()
+    ClearResults()
+    for _, data in ipairs(currentResults) do AddResultCard(data) end
+end)
+
+MinBtn.MouseButton1Click:Connect(function()
+    Main.Visible = false
+    MiniBall.Visible = true
+end)
+
+MiniBall.MouseButton1Click:Connect(function()
+    Main.Visible = true
+    MiniBall.Visible = false
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+SearchBox.FocusLost:Connect(function(enter)
+    if enter and SearchBox.Text ~= "" then DoSearch(SearchBox.Text) end
+end)
