@@ -1,15 +1,17 @@
 # Search for script by zazz 2.1
 
-Script GUI buat cari + run script dari Scriptblox langsung di Roblox
+Roblox GUI script to search + run scripts from ScriptBlox directly in-game
 
-### Fitur
-- 🔍 Search script Scriptblox 
-- ✅ Scan keamanan script
-- ⭐ Favorit & History
-- 💬 Liat komentar user lain
+## Features
+
+- 🔍 Search ScriptBlox scripts
+- ✅ Built-in script security scanner  
+- ⭐ Favorites & History system
+- 💬 View comments from other users
 - 👍 Like/Dislike/View counter
-- 🎮 Filter Game / Universal
+- 🎮 Game / Universal script filter
 
-### Cara Pake
+## How to Use
+
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/hafispp070-hub/Search-by-zazz-2026/main/search%20by%20zazz.lua"))()
